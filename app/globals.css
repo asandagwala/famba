@@ -128,3 +128,55 @@
     @apply font-sans;
   }
 }
+/* ───────────── Famba theme — kente, shea & earth ───────────── */
+@theme inline {
+  --color-night: #0b1530;      /* deep indigo cloth */
+  --color-night-2: #12214a;
+  --color-gold: #e2a72e;       /* kente gold — escrow lock */
+  --color-gold-soft: #f6dfa4;
+  --color-kente: #1d7a43;      /* kente green — settled / savings */
+  --color-kente-soft: #d5ecd9;
+  --color-crimson: #a3262a;    /* kente red — errors, SWIFT cost */
+  --color-clay: #b4562b;       /* terracotta earth */
+  --color-bark: #5b3a22;       /* wooden bowl brown */
+  --color-shea: #f7efdc;       /* shea butter cream — cards */
+  --color-straw: #d8b56d;      /* bolga basket straw */
+  --color-ink: #1c1712;
+  --font-display: var(--font-fraunces);
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #181412;
+  --border: #e8dcd0;
+  --ring: #c84b24;
+}
+
+.kente-band {
+  background-image:
+    repeating-linear-gradient(90deg,
+      #e2a72e 0 22px, #1c1712 22px 26px, #1d7a43 26px 44px, #1c1712 44px 48px,
+      #e2a72e 48px 60px, #a3262a 60px 74px, #1c1712 74px 78px, #e2a72e 78px 96px, #12214a 96px 104px);
+}
+.kente-zigzag {
+  background-color: #1c1712;
+  background-image:
+    linear-gradient(135deg, #e2a72e 25%, transparent 25%),
+    linear-gradient(225deg, #e2a72e 25%, transparent 25%);
+  background-size: 18px 18px;
+  background-position: 0 0;
+}
+.woven {
+  background-image:
+    repeating-linear-gradient(0deg, rgb(216 181 109 / 0.07) 0 2px, transparent 2px 6px),
+    repeating-linear-gradient(90deg, rgb(216 181 109 / 0.05) 0 2px, transparent 2px 6px),
+    radial-gradient(ellipse at 20% -10%, #1b2f63 0%, transparent 55%),
+    radial-gradient(ellipse at 110% 110%, rgb(180 86 43 / 0.25) 0%, transparent 50%);
+}
+
+@media print {
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area { position: absolute; inset: 0; margin: 0; box-shadow: none !important; }
+  .no-print { display: none !important; }
+}
