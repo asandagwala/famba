@@ -25,11 +25,14 @@ in Ghana and sells across Africa.
 
 ## Run it
 
+This project uses **pnpm**. Run each line separately (Windows PowerShell 5.1 does not support `&&`):
+
 ```bash
-npm install && npm start
+pnpm install
+pnpm start
 ```
 
-Open <http://localhost:3000>. Data is saved to `data/famba-db.json`, so it survives refreshes and restarts. Use
+Wait for `Ready`, then open <http://localhost:3000>. Data is saved to `data/famba-db.json`, so it survives refreshes and restarts. Use
 **Reset demo data** on the dashboard to start again.
 
 To turn on the chatbot, create a `.env.local` file containing:
@@ -74,6 +77,10 @@ payment link, and click **Pay with wallet**. With no wallet, use **Make a demo p
 > Demo on testnet: no real money moves. Local-currency payouts to M-Pesa, mobile money and bank accounts are
 > simulated; in production they would go through a licensed off-ramp partner.
 
-## Token usage
+## How we kept tokens low
 
-<!-- Add your 3 lines on token usage and the /usage screenshot here. -->
+1. Built on the existing Next.js scaffold and installed packages, with no extra frameworks, auth or external database: one JSON file stores everything.
+2. Payments are verified with plain JSON-RPC calls to Base Sepolia instead of a heavy web3 SDK, and FX rates are cached for 10 minutes.
+3. The assistant runs Claude at low effort with small read-only tools and only the last 12 messages, so each chat turn stays short.
+
+*Note: much of this code was written with Claude Code. See the `/usage` screenshot in our submission for GitHub Copilot token usage.*
