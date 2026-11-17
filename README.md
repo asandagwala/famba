@@ -20,6 +20,14 @@ Famba is a payment app for small businesses that sell to, and buy from, other Af
 | **Cash out** | Turn your USDC balance into rand in your South African bank account. |
 | **Famba Assistant** | A Claude-powered chatbot that answers questions like "Who hasn't paid me yet?" or "How much have I saved on fees?" using your real data. It is **read-only**: it has no tool that can move money. |
 
+## One-minute demo
+
+1. Open **/dashboard**: show the balance, every payment with its route (e.g. `KE → ZA`), and the money saved compared with banks.
+2. Click **New payment link**, create one for a customer in **Kenya**, and show the QR code.
+3. Open the link, choose Kenya, show the price in **KES**, then click **Make a demo payment instead**.
+4. Go to **Pay suppliers** and pay **Tamale Shea Women's Co-op** in **GHS**.
+5. Click **Ask Famba** and ask *"Who hasn't paid me yet?"*
+
 The demo business is **Ubuntu Naturals**, a Cape Town shea butter and black soap brand that buys from women's co-ops
 in Ghana and sells across Africa.
 
