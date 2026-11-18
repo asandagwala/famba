@@ -1,53 +1,58 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import { balanceOf, readDb } from "@/lib/famba/db";
 import { COUNTRY, CURRENCIES, FAMBA, SWIFT, getRates, round, type Currency } from "@/lib/famba/rates";
 
-// POST /api/chat { messages: [{role, content}] } — Famba assistant.
+// POST /api/chat { messages: [{role, content}] } — Famba Assistant, powered by Gemini.
 // Read-only: it can look things up, but it has no tool that moves money.
 
-const SYSTEM = `You are Famba Assistant, the helper inside Famba, a cross-border payments app for African small businesses.
-Famba lets a business get paid by customers anywhere in Africa and pay suppliers in other African countries, using USDC (a digital US dollar) on the Base network. Money arrives in about 15 seconds for a 0.2% fee, instead of 3-5 days and around 9.5% through banks.
+// Tried in order: if one is overloaded (503) or unavailable to this key (404), the next is used.
+const MODELS = process.env.GEMINI_MODEL
+  ? [process.env.GEMINI_MODEL]
+  : ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite"];
 
-You help the merchant understand their money: balances, who has paid, who hasn't, supplier payments, cash-outs, exchange rates, and fee savings. Use the tools to get real numbers; never invent figures.
-You are read-only. You cannot send, move, refund, or cash out money. If asked to, explain how the merchant can do it in the app (Dashboard → New payment link, Suppliers → Pay, Cash out).
-Keep answers short, warm and in plain language. Show amounts in both USDC and the local currency where useful. Use South African formatting (R 1 234,56) for rand.`;
+const SYSTEM = `You are Famba Assistant, the helper inside Famba, a stablecoin payment gateway for African businesses.
+Customers in other African countries pay in their own currency (mobile money, bank or a USDC wallet); Famba settles it as USDC on the Base network in about 15 seconds for a 0.2% fee, matches it to the order, and the merchant settles to their bank in rand. Bank transfers between African countries usually take 3-5 days and cost 2-7%.
 
-const tools: Anthropic.Beta.BetaTool[] = [
+You help the merchant understand their money: balances, who has paid, who hasn't, how customers paid, supplier payments, settlements, exchange rates and fee savings. Always use the tools to get real numbers; never invent figures.
+You are read-only. You cannot send, move, refund or settle money. If asked to, explain how the merchant can do it in the app (Payments → Create payment link, Suppliers → Pay, Settlements → Settle to bank).
+Keep answers short, warm and in plain language, without markdown headings or tables. Use South African formatting for rand (R1 234,56).`;
+
+const noArgs = { type: Type.OBJECT, properties: {} };
+
+const tools: FunctionDeclaration[] = [
   {
     name: "get_balance",
-    description: "The merchant's current Famba balance: USDC received from customers, paid to suppliers, cashed out, and available now, plus the rand equivalent.",
-    input_schema: { type: "object", properties: {}, additionalProperties: false },
+    description: "The merchant's Famba balance: USDC received from customers, paid to suppliers, settled to bank, and available now, plus the rand equivalent.",
+    parameters: noArgs,
   },
   {
     name: "list_customer_payments",
-    description: "Customer orders / payment links, newest first. Filter by status PAID or PENDING (unpaid).",
-    input_schema: {
-      type: "object",
-      properties: { status: { type: "string", enum: ["PAID", "PENDING", "ALL"] } },
-      additionalProperties: false,
+    description: "Customer orders / payment links, newest first, including how each customer paid. Filter by status PAID, PENDING (unpaid) or ALL.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: { status: { type: Type.STRING, enum: ["PAID", "PENDING", "ALL"] } },
     },
   },
   {
     name: "list_supplier_payments",
     description: "Payments the merchant has sent to suppliers in other African countries, newest first, and the supplier list.",
-    input_schema: { type: "object", properties: {}, additionalProperties: false },
+    parameters: noArgs,
   },
   {
     name: "get_exchange_rates",
     description: "Live exchange rates: how many units of ZAR, KES, NGN, GHS and ZMW equal 1 USDC.",
-    input_schema: { type: "object", properties: {}, additionalProperties: false },
+    parameters: noArgs,
   },
   {
     name: "compare_fees",
-    description: "Compare the cost of sending an amount across borders with a bank (SWIFT) versus Famba.",
-    input_schema: {
-      type: "object",
+    description: "Compare the cost of sending an amount across borders by bank versus with Famba.",
+    parameters: {
+      type: Type.OBJECT,
       properties: {
-        amount: { type: "number", description: "Amount to send" },
-        currency: { type: "string", enum: [...CURRENCIES] },
+        amount: { type: Type.NUMBER, description: "Amount to send" },
+        currency: { type: Type.STRING, enum: [...CURRENCIES] },
       },
       required: ["amount", "currency"],
-      additionalProperties: false,
     },
   },
 ];
@@ -65,12 +70,24 @@ async function runTool(name: string, input: Record<string, unknown>) {
       return db.orders
         .filter((o) => status === "ALL" || o.status === status)
         .reverse()
-        .map((o) => ({ customer: o.customerName, from: o.customerCountry, item: o.description, amountZar: o.amountZar, usdc: o.usdcAmount, status: o.status, created: o.createdAt, paidAt: o.paidAt, verifiedOnChain: o.mode === "onchain" }));
+        .map((o) => ({
+          customer: o.customerName,
+          from: o.customerCountry,
+          item: o.description,
+          amountZar: o.amountZar,
+          usdc: o.usdcAmount,
+          status: o.status,
+          paidWith: o.paidWith ? `${o.paidWith.provider} (${o.paidWith.currency} ${o.paidWith.amount})` : null,
+          created: o.createdAt,
+          paidAt: o.paidAt,
+          verifiedOnChain: o.mode === "onchain",
+        }));
     }
     case "list_supplier_payments":
       return {
         payments: [...db.supplierPayments].reverse().map((p) => ({ supplier: p.supplierName, usdc: p.usdcAmount, received: `${p.currency} ${p.localAmount}`, note: p.note, date: p.createdAt, onChain: p.mode === "onchain" })),
         suppliers: db.suppliers.map((s) => ({ name: s.name, product: s.product, country: s.country, currency: s.currency, payoutMethod: s.payoutMethod })),
+        settlements: db.cashOuts.map((c) => ({ bank: c.bank, zar: c.zarAmount, usdc: c.usdcAmount, date: c.createdAt })),
       };
     case "get_exchange_rates":
       return { usdcTo: r.rates, source: r.source, asOf: r.fetchedAt, countries: COUNTRY };
@@ -90,72 +107,79 @@ async function runTool(name: string, input: Record<string, unknown>) {
   }
 }
 
+async function generate(ai: GoogleGenAI, contents: Content[]) {
+  let lastErr: unknown;
+  for (const model of MODELS) {
+    try {
+      return await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction: SYSTEM,
+          tools: [{ functionDeclarations: tools }],
+          temperature: 0.3,
+          httpOptions: { timeout: 20_000 },
+        },
+      });
+    } catch (e) {
+      lastErr = e;
+      const status = (e as { status?: number }).status;
+      if (status && status !== 404 && status !== 429 && status < 500) throw e; // a real error, not "busy"
+    }
+  }
+  throw lastErr;
+}
+
+const NOT_SET_UP ="The assistant isn't set up yet. Add GEMINI_API_KEY to a .env.local file (or your Vercel settings) and restart the app.";
+
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { messages?: { role: string; content: string }[] } | null;
   const history = (body?.messages ?? [])
     .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
-    .slice(-12)
-    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content.slice(0, 2000) }));
+    .slice(-12);
   if (!history.length || history[0].role !== "user" || history.at(-1)?.role !== "user")
     return Response.json({ error: "Send a question." }, { status: 400 });
 
-  let client: Anthropic;
-  try {
-    client = new Anthropic();
-  } catch {
-    return Response.json({ reply: "The assistant isn't set up yet. Add ANTHROPIC_API_KEY to a .env.local file and restart the app." });
-  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return Response.json({ reply: NOT_SET_UP });
+  const ai = new GoogleGenAI({ apiKey });
 
-  const messages: Anthropic.Beta.BetaMessageParam[] = history;
+  const contents: Content[] = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content.slice(0, 2000) }],
+  }));
+
   try {
     for (let turn = 0; turn < 6; turn++) {
-      const response = await client.beta.messages.create({
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default", // re-run on a fallback model if a safety classifier declines
-        model: "claude-opus-5-5",
-        max_tokens: 4000,
-        output_config: { effort: "low" },
-        system: SYSTEM,
-        tools,
-        messages,
-      });
+      const response = await generate(ai, contents);
 
-      if (response.stop_reason === "refusal")
-        return Response.json({ reply: "Sorry, I can't help with that one. Ask me about your payments, balance or rates." });
-
-      if (response.stop_reason !== "tool_use") {
-        const reply = response.content
-          .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
-          .map((b) => b.text)
-          .join("\n")
-          .trim();
+      const calls = response.functionCalls ?? [];
+      if (calls.length === 0) {
+        const reply = (response.text ?? "").trim();
         return Response.json({ reply: reply || "I'm not sure. Could you rephrase that?" });
       }
 
-      messages.push({ role: "assistant", content: response.content });
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
-      for (const block of response.content) {
-        if (block.type !== "tool_use") continue;
+      // Keep the model's turn (including its function calls), then answer every call in one user turn.
+      const modelTurn = response.candidates?.[0]?.content;
+      if (modelTurn) contents.push(modelTurn);
+      const results: Part[] = [];
+      for (const call of calls) {
+        let result: unknown;
         try {
-          const out = await runTool(block.name, (block.input ?? {}) as Record<string, unknown>);
-          results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
+          result = await runTool(call.name ?? "", (call.args ?? {}) as Record<string, unknown>);
         } catch (e) {
-          results.push({ type: "tool_result", tool_use_id: block.id, content: String(e), is_error: true });
+          result = { error: String(e) };
         }
+        results.push({ functionResponse: { id: call.id, name: call.name, response: { result } } });
       }
-      messages.push({ role: "user", content: results });
+      contents.push({ role: "user", parts: results });
     }
     return Response.json({ reply: "That took too many steps. Could you ask something more specific?" });
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError)
-      return Response.json({ reply: "The assistant's API key is missing or invalid. Set ANTHROPIC_API_KEY in .env.local and restart." });
-    if (error instanceof Anthropic.RateLimitError)
-      return Response.json({ reply: "I'm getting a lot of questions right now. Try again in a moment." });
-    if (error instanceof Anthropic.APIError)
-      return Response.json({ reply: `The assistant hit an error (${error.status}). Try again.` });
-    const msg = error instanceof Error ? error.message : "";
-    if (/api key|apiKey|credentials|auth/i.test(msg))
-      return Response.json({ reply: "The assistant isn't set up yet. Add ANTHROPIC_API_KEY to a .env.local file and restart the app." });
+    const status = (error as { status?: number }).status;
+    if (status === 401 || status === 403) return Response.json({ reply: "The assistant's API key was rejected. Check GEMINI_API_KEY and restart." });
+    if (status === 429) return Response.json({ reply: "I'm getting a lot of questions right now. Try again in a moment." });
+    if (status) return Response.json({ reply: `The assistant hit an error (${status}). Try again.` });
     return Response.json({ reply: "I couldn't reach the assistant service. Check your internet connection." });
   }
 }
