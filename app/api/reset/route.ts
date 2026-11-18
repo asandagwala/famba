@@ -1,10 +1,7 @@
-import { transact } from "@/lib/famba/db";
-import { seed } from "@/lib/famba/seed";
+import { resetDemo } from "@/lib/famba/db";
 
 // POST /api/reset — restore the demo data
 export async function POST() {
-  await transact((db) => {
-    Object.assign(db, seed());
-  });
+  await resetDemo();
   return Response.json({ ok: true });
 }

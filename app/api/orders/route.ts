@@ -1,4 +1,4 @@
-import { newId, transact, type Order } from "@/lib/famba/db";
+import { createOrder, newId, type Order } from "@/lib/famba/db";
 import { getRates, round } from "@/lib/famba/rates";
 
 // POST /api/orders — create a payment link a customer anywhere in Africa can pay
@@ -25,8 +25,6 @@ export async function POST(request: Request) {
     status: "PENDING",
     createdAt: new Date().toISOString(),
   };
-  await transact((db) => {
-    db.orders.push(order);
-  });
+  await createOrder(order);
   return Response.json({ order }, { status: 201 });
 }

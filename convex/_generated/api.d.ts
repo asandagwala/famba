@@ -8,13 +8,19 @@
  * @module
  */
 
+import type * as famba from "../famba.js";
+import type * as seedData from "../seedData.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  famba: typeof famba;
+  seedData: typeof seedData;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.

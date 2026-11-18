@@ -1,4 +1,4 @@
-import { balanceOf, newId, transact, type CashOut } from "@/lib/famba/db";
+import { addCashOut, FambaError, newId, type CashOut } from "@/lib/famba/db";
 import { getRates, round } from "@/lib/famba/rates";
 
 const FEE_PCT = 0.5;
@@ -10,23 +10,23 @@ export async function POST(request: Request) {
   const bank = typeof b?.bank === "string" ? b.bank.trim().slice(0, 80) : "";
   if (!(usdcAmount > 0)) return Response.json({ error: "Enter an amount above zero." }, { status: 400 });
   if (!bank) return Response.json({ error: "Choose a bank account." }, { status: 400 });
+
   const { rates } = await getRates();
-  const result = await transact((db) => {
-    const available = balanceOf(db).available;
-    if (usdcAmount > available + 1e-9) return { error: `You only have ${available.toFixed(2)} USDC available.` };
-    const gross = usdcAmount * rates.ZAR;
-    const fee = (gross * FEE_PCT) / 100;
-    const c: CashOut = {
-      id: newId("cash"),
-      usdcAmount: round(usdcAmount, 2),
-      zarAmount: round(gross - fee),
-      fee: round(fee),
-      bank,
-      createdAt: new Date().toISOString(),
-    };
-    db.cashOuts.push(c);
-    return { cashOut: c };
-  });
-  if ("error" in result) return Response.json(result, { status: 422 });
-  return Response.json(result, { status: 201 });
+  const gross = usdcAmount * rates.ZAR;
+  const fee = (gross * FEE_PCT) / 100;
+  const cashOut: CashOut = {
+    id: newId("cash"),
+    usdcAmount: round(usdcAmount, 2),
+    zarAmount: round(gross - fee),
+    fee: round(fee),
+    bank,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await addCashOut(cashOut);
+  } catch (e) {
+    if (e instanceof FambaError) return Response.json({ error: e.message }, { status: 422 });
+    throw e;
+  }
+  return Response.json({ cashOut }, { status: 201 });
 }

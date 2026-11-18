@@ -1,7 +1,6 @@
-import { balanceOf, newId, transact, type SupplierPayment } from "@/lib/famba/db";
+import { addSupplierPayment, FambaError, newId, readDb, type SupplierPayment } from "@/lib/famba/db";
 import { getRates, round } from "@/lib/famba/rates";
 import { isTxHash, verifyUsdcTransfer } from "@/lib/famba/chain";
-import { HttpError } from "@/lib/famba/http";
 
 // POST /api/suppliers/pay { supplierId, usdcAmount, note, txHash? } — pay a supplier in another country
 export async function POST(request: Request) {
@@ -12,37 +11,38 @@ export async function POST(request: Request) {
   if (b?.txHash !== undefined && !isTxHash(b.txHash))
     return Response.json({ error: "Invalid transaction hash." }, { status: 400 });
   const txHash = b?.txHash as string | undefined;
-  const { rates } = await getRates();
-  try {
-    const payment = await transact(async (db) => {
-      const s = db.suppliers.find((x) => x.id === b?.supplierId);
-      if (!s) throw new HttpError(404, "Supplier not found.");
-      if (txHash) {
-        const v = await verifyUsdcTransfer(txHash, s.walletAddress, usdcAmount);
-        if (!v.ok) throw new HttpError(422, v.reason);
-      } else {
-        const available = balanceOf(db).available;
-        if (usdcAmount > available + 1e-9)
-          throw new HttpError(422, `Not enough balance. You have ${available.toFixed(2)} USDC available.`);
-      }
-      const p: SupplierPayment = {
-        id: newId("spay"),
-        supplierId: s.id,
-        supplierName: s.name,
-        usdcAmount: round(usdcAmount, 2),
-        localAmount: round(usdcAmount * rates[s.currency]),
-        currency: s.currency,
-        note: note || `Payment to ${s.name}`,
-        createdAt: new Date().toISOString(),
-        txHash,
-        mode: txHash ? "onchain" : "demo",
-      };
-      db.supplierPayments.push(p);
-      return p;
-    });
-    return Response.json({ payment }, { status: 201 });
-  } catch (e) {
-    if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
-    return Response.json({ error: "Couldn't reach Base Sepolia. Try again." }, { status: 502 });
+
+  const [db, { rates }] = await Promise.all([readDb(), getRates()]);
+  const s = db.suppliers.find((x) => x.id === b?.supplierId);
+  if (!s) return Response.json({ error: "Supplier not found." }, { status: 404 });
+
+  if (txHash) {
+    try {
+      const v = await verifyUsdcTransfer(txHash, s.walletAddress, usdcAmount);
+      if (!v.ok) return Response.json({ error: v.reason }, { status: 422 });
+    } catch {
+      return Response.json({ error: "Couldn't reach Base Sepolia. Try again." }, { status: 502 });
+    }
   }
+
+  const payment: SupplierPayment = {
+    id: newId("spay"),
+    supplierId: s.id,
+    supplierName: s.name,
+    usdcAmount: round(usdcAmount, 2),
+    localAmount: round(usdcAmount * rates[s.currency]),
+    currency: s.currency,
+    note: note || `Payment to ${s.name}`,
+    createdAt: new Date().toISOString(),
+    txHash,
+    mode: txHash ? "onchain" : "demo",
+  };
+  try {
+    // With a tx hash it was paid from the merchant's own wallet; otherwise it comes out of the Famba balance.
+    await addSupplierPayment(payment, !txHash);
+  } catch (e) {
+    if (e instanceof FambaError) return Response.json({ error: e.message }, { status: 422 });
+    throw e;
+  }
+  return Response.json({ payment }, { status: 201 });
 }
