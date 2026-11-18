@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Supplier, SupplierPayment } from "@/lib/famba/db";
 import type { Currency, RateSnapshot } from "@/lib/famba/rates";
-import { AppHeader, Card, EXPLORER_TX, Pill, Route, api, btnDark, btnPrimary, inputCls, labelCls, money, usdc, useWallet, when } from "@/components/famba/ui";
+import {
+  AppHeader, EXPLORER_TX, Modal, PageTitle, Panel, PanelHead, Route,
+  api, btnPrimary, btnLine, inputCls, labelCls, money, usdc, useWallet, when,
+} from "@/components/famba/ui";
 import Chatbot from "@/components/famba/chatbot";
 
 type Overview = {
-  merchant: { name: string };
+  merchant: { name: string; city: string };
   balance: { available: number };
   rates: RateSnapshot;
   suppliers: Supplier[];
@@ -25,79 +28,79 @@ export default function SuppliersPage() {
     return () => window.clearTimeout(t);
   }, [load]);
 
+  const zar = data?.rates.rates.ZAR ?? 0;
+
   return (
-    <div className="min-h-screen bg-white text-[#181412]">
-      <AppHeader merchant={data?.merchant.name} />
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-8">
-        <h1 className="text-3xl font-black" style={{ fontFamily: "var(--font-display)" }}>
-          Pay suppliers across Africa
-        </h1>
-        <p className="text-[#685D55]">
-          Pick a supplier, enter what they should receive in their currency, and Famba sends it as USDC in seconds.
-          {data && <> Available: <b className="font-mono">{usdc(data.balance.available)}</b></>}
+    <div className="min-h-screen bg-ivory text-ink">
+      <AppHeader merchant={data ? `${data.merchant.name} · ${data.merchant.city}` : undefined} />
+      <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+        <PageTitle eyebrow="Pay across borders" title="Suppliers" />
+        <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-stone">
+          Enter what your supplier should receive in their own currency. Famba sends it as USDC and it lands as mobile money or a bank deposit in seconds.
+          {data && (
+            <>
+              {" "}You have <span className="num font-semibold text-ink">{usdc(data.balance.available)}</span> available.
+            </>
+          )}
         </p>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {data?.suppliers.map((s) => (
-            <Card key={s.id} className="flex flex-col p-5">
-              <div className="flex items-center justify-between">
-                <Route from="South Africa" to={s.country} />
-                <Pill tone="muted">{s.currency}</Pill>
-              </div>
-              <h2 className="mt-3 font-bold leading-tight">{s.name}</h2>
-              <p className="text-sm text-[#685D55]">{s.product}</p>
-              <p className="mt-2 text-xs text-[#685D55]">
-                {s.country} · paid by <b>{s.payoutMethod}</b>
-              </p>
-              <button onClick={() => setPaying(s)} className={`${btnPrimary} mt-4 py-2.5 text-sm`}>
-                Pay {s.name.split(" ")[0]}
-              </button>
-            </Card>
-          ))}
-        </div>
+        <Panel className="mt-8">
+          <PanelHead title="Your suppliers" />
+          <ul className="divide-y divide-rule">
+            {data?.suppliers.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
+                <div className="min-w-0">
+                  <p className="font-medium">{s.name}</p>
+                  <p className="text-[13px] text-stone">
+                    {s.product} · {s.country} · paid by {s.payoutMethod} in {s.currency}
+                  </p>
+                </div>
+                <div className="flex items-center gap-5">
+                  <Route from="South Africa" to={s.country} />
+                  <button onClick={() => setPaying(s)} className={`${btnLine} py-2`}>
+                    Pay
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
 
-        <Card className="mt-8">
-          <h2 className="border-b border-[#EDE2D6] px-5 py-4 text-lg font-bold">Payment history</h2>
-          <ul className="divide-y divide-[#EDE2D6]">
-            {data?.supplierPayments.map((p) => {
-              const s = data.suppliers.find((x) => x.id === p.supplierId);
-              return (
-                <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold">{p.supplierName}</p>
-                      <Route from="South Africa" to={s?.country ?? "South Africa"} />
-                    </div>
-                    <p className="text-sm text-[#685D55]">
-                      {p.note} · {when(p.createdAt)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-mono font-bold text-[#1E6B45]">{money(p.localAmount, p.currency)}</p>
-                    <p className="text-xs text-[#685D55]">
-                      {usdc(p.usdcAmount)} ·{" "}
-                      {p.txHash ? (
-                        <a href={EXPLORER_TX + p.txHash} target="_blank" rel="noreferrer" className="text-[#1E6B45] underline">
+        <Panel className="mt-8">
+          <PanelHead title="Payment history" />
+          <ul className="divide-y divide-rule">
+            {data?.supplierPayments.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
+                <div className="min-w-0">
+                  <p className="font-medium">{p.supplierName}</p>
+                  <p className="text-[13px] text-stone">
+                    {p.note} · {when(p.createdAt)}
+                    {p.txHash && (
+                      <>
+                        {" · "}
+                        <a href={EXPLORER_TX + p.txHash} target="_blank" rel="noreferrer" className="underline underline-offset-2">
                           on-chain
                         </a>
-                      ) : (
-                        "from balance"
-                      )}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-            {data && data.supplierPayments.length === 0 && <li className="px-5 py-6 text-center text-sm text-[#685D55]">No supplier payments yet.</li>}
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="num font-semibold text-leaf">{money(p.localAmount, p.currency)}</p>
+                  <p className="num text-[13px] text-stone">{usdc(p.usdcAmount)} · {money(p.usdcAmount * zar, "ZAR")}</p>
+                </div>
+              </li>
+            ))}
+            {data && data.supplierPayments.length === 0 && <li className="px-6 py-8 text-center text-stone">No supplier payments yet.</li>}
           </ul>
-        </Card>
+        </Panel>
       </main>
 
       {paying && data && (
         <PayModal
           supplier={paying}
           rate={data.rates.rates[paying.currency as Currency]}
-          zarRate={data.rates.rates.ZAR}
+          zarRate={zar}
           available={data.balance.available}
           onClose={() => setPaying(null)}
           onPaid={(p) => {
@@ -109,25 +112,25 @@ export default function SuppliersPage() {
       )}
 
       {done && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={() => setDone(null)}>
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-[#1E6B45] text-2xl text-white">✓</div>
-            <h3 className="mt-3 text-2xl font-black" style={{ fontFamily: "var(--font-display)" }}>
-              Supplier paid
-            </h3>
-            <p className="mt-1 text-[#685D55]">{done.supplierName} receives</p>
-            <p className="font-mono text-3xl font-black text-[#1E6B45]">{money(done.localAmount, done.currency)}</p>
-            <p className="mt-1 text-xs text-[#685D55]">{usdc(done.usdcAmount)} · arrived in seconds</p>
+        <Modal onClose={() => setDone(null)} width="max-w-sm">
+          <div className="p-7 text-center">
+            <p className="inline-flex items-center gap-2 text-[14px] font-semibold text-leaf">
+              <span className="flex size-5 items-center justify-center rounded-full bg-leaf text-[12px] text-white">✓</span>
+              Sent
+            </p>
+            <h3 className="mt-3 font-display text-[24px] font-semibold leading-tight">{done.supplierName} has been paid</h3>
+            <p className="num mt-3 font-display text-[34px] font-semibold text-leaf">{money(done.localAmount, done.currency)}</p>
+            <p className="num mt-1 text-[13px] text-stone">{usdc(done.usdcAmount)} · arrived in seconds</p>
             {done.txHash && (
-              <a href={EXPLORER_TX + done.txHash} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-[#1E6B45] underline">
+              <a href={EXPLORER_TX + done.txHash} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[13px] underline">
                 View on Basescan
               </a>
             )}
-            <button onClick={() => setDone(null)} className={`${btnDark} mt-5 w-full`}>
+            <button onClick={() => setDone(null)} className={`${btnPrimary} mt-6 w-full`}>
               Done
             </button>
           </div>
-        </div>
+        </Modal>
       )}
       <Chatbot />
     </div>
@@ -135,19 +138,9 @@ export default function SuppliersPage() {
 }
 
 function PayModal({
-  supplier,
-  rate,
-  zarRate,
-  available,
-  onClose,
-  onPaid,
+  supplier, rate, zarRate, available, onClose, onPaid,
 }: {
-  supplier: Supplier;
-  rate: number;
-  zarRate: number;
-  available: number;
-  onClose: () => void;
-  onPaid: (p: SupplierPayment) => void;
+  supplier: Supplier; rate: number; zarRate: number; available: number; onClose: () => void; onPaid: (p: SupplierPayment) => void;
 }) {
   const [local, setLocal] = useState("");
   const [note, setNote] = useState("");
@@ -160,12 +153,9 @@ function PayModal({
   const zar = usdcAmount * zarRate;
 
   const record = (txHash?: string) =>
-    api<{ payment: SupplierPayment }>("/api/suppliers/pay", {
-      method: "POST",
-      body: JSON.stringify({ supplierId: supplier.id, usdcAmount, note, txHash }),
-    });
+    api<{ payment: SupplierPayment }>("/api/suppliers/pay", { method: "POST", body: JSON.stringify({ supplierId: supplier.id, usdcAmount, note, txHash }) });
 
-  const payFromBalance = async () => {
+  const fromBalance = async () => {
     setError(null);
     setBusy("Sending…");
     try {
@@ -177,7 +167,7 @@ function PayModal({
     }
   };
 
-  const payFromWallet = async () => {
+  const fromWallet = async () => {
     setError(null);
     try {
       setBusy("Confirm in your wallet…");
@@ -193,52 +183,39 @@ function PayModal({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="max-h-[92vh] w-full max-w-md space-y-4 overflow-auto rounded-3xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose}>
+      <div className="space-y-5 p-7">
         <div>
           <Route from="South Africa" to={supplier.country} />
-          <h2 className="mt-2 text-2xl font-black" style={{ fontFamily: "var(--font-display)" }}>
-            Pay {supplier.name}
-          </h2>
-          <p className="text-sm text-[#685D55]">
-            {supplier.country} · they receive {supplier.currency} by {supplier.payoutMethod}
+          <h2 className="mt-1 font-display text-[24px] font-semibold leading-tight">Pay {supplier.name}</h2>
+          <p className="mt-1 text-[14px] text-stone">
+            They receive {supplier.currency} by {supplier.payoutMethod}.
           </p>
         </div>
         <label className="block">
-          <span className={labelCls}>They should receive ({supplier.currency})</span>
-          <input className={`${inputCls} font-mono text-xl`} type="number" min="1" value={local} onChange={(e) => setLocal(e.target.value)} placeholder="0.00" autoFocus />
+          <span className={labelCls}>Amount they receive ({supplier.currency})</span>
+          <input className={`${inputCls} num text-[20px]`} type="number" min="1" value={local} onChange={(e) => setLocal(e.target.value)} placeholder="0.00" autoFocus />
         </label>
         <label className="block">
-          <span className={labelCls}>Reference (optional)</span>
-          <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Invoice #TS-120" />
+          <span className={labelCls}>Reference</span>
+          <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Invoice TS-120" />
         </label>
         {usdcAmount > 0 && (
-          <div className="space-y-1 rounded-2xl bg-[#FFF8EE] p-4 text-sm">
-            <div className="flex justify-between">
-              <span className="text-[#685D55]">You send</span>
-              <b className="font-mono">{usdc(usdcAmount)}</b>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[#685D55]">In rand</span>
-              <span className="font-mono">≈ {money(zar, "ZAR")}</span>
-            </div>
-            <div className="flex justify-between text-[#1E6B45]">
-              <span>Saved vs bank</span>
-              <b className="font-mono">{money(zar * 0.093, "ZAR")}</b>
-            </div>
-          </div>
+          <dl className="space-y-2 border-y border-rule py-4 text-[14px]">
+            <div className="flex justify-between"><dt className="text-stone">You send</dt><dd className="num font-semibold">{usdc(usdcAmount)}</dd></div>
+            <div className="flex justify-between"><dt className="text-stone">In rand</dt><dd className="num">{money(zar, "ZAR")}</dd></div>
+            <div className="flex justify-between"><dt className="text-stone">Fee</dt><dd className="num">{money(zar * 0.002, "ZAR")}</dd></div>
+          </dl>
         )}
-        {error && <p className="rounded-xl bg-[#FBEDEA] px-3 py-2 text-sm text-[#8B1E24]">{error}</p>}
-        <button onClick={payFromBalance} disabled={!!busy || !(usdcAmount > 0)} className={`${btnPrimary} w-full`}>
-          {busy ?? `Pay from Famba balance (${usdc(available)})`}
+        {error && <p className="rounded-md bg-kred-soft px-3 py-2 text-[14px] text-kred">{error}</p>}
+        <button onClick={fromBalance} disabled={!!busy || !(usdcAmount > 0)} className={`${btnPrimary} w-full`}>
+          {busy ?? "Pay from Famba balance"}
         </button>
-        <button onClick={payFromWallet} disabled={!!busy || !(usdcAmount > 0)} className="w-full rounded-xl border-2 border-[#181412] py-2.5 font-bold disabled:opacity-50">
-          Pay from my wallet (real testnet USDC)
-        </button>
-        <button onClick={onClose} className="w-full text-sm text-[#685D55] underline">
-          Cancel
+        <p className="num -mt-2 text-center text-[13px] text-stone">{usdc(available)} available</p>
+        <button onClick={fromWallet} disabled={!!busy || !(usdcAmount > 0)} className={`${btnLine} w-full`}>
+          Pay from my own wallet instead
         </button>
       </div>
-    </div>
+    </Modal>
   );
 }
