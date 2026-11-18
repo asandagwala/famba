@@ -128,55 +128,55 @@
     @apply font-sans;
   }
 }
-/* ───────────── Famba theme — kente, shea & earth ───────────── */
+/* ───────────── Famba — kente palette ─────────────
+   Taken from the kente cloth photo: the royal-blue ground it rests on
+   is the main colour; woven gold is a small accent only; leaf green
+   for money received; deep red for warnings; calm warm-white surfaces. */
 @theme inline {
-  --color-night: #0b1530;      /* deep indigo cloth */
-  --color-night-2: #12214a;
-  --color-gold: #e2a72e;       /* kente gold — escrow lock */
-  --color-gold-soft: #f6dfa4;
-  --color-kente: #1d7a43;      /* kente green — settled / savings */
-  --color-kente-soft: #d5ecd9;
-  --color-crimson: #a3262a;    /* kente red — errors, SWIFT cost */
-  --color-clay: #b4562b;       /* terracotta earth */
-  --color-bark: #5b3a22;       /* wooden bowl brown */
-  --color-shea: #f7efdc;       /* shea butter cream — cards */
-  --color-straw: #d8b56d;      /* bolga basket straw */
-  --color-ink: #1c1712;
+  --color-night: #10306a;   /* kente royal blue — header, primary buttons */
+  --color-night-2: #153c80;
+  --color-night-3: #1d4c99; /* hover / links */
+  --color-azure-soft: #e8eef8;
+  --color-gold: #c4932f;    /* muted woven gold — accents only */
+  --color-gold-deep: #9c7220;
+  --color-gold-soft: #f4eee2;
+  --color-leaf: #17713f;
+  --color-leaf-soft: #e3f1e8;
+  --color-kred: #a8201f;
+  --color-kred-soft: #f8e4e1;
+  --color-thread: #141414;
+  --color-ivory: #f5f3ee;
+  --color-paper: #fdfcfa;
+  --color-ink: #17181c;
+  --color-stone: #62646b;
+  --color-rule: #e2dfd8;
   --font-display: var(--font-fraunces);
 }
 
 :root {
-  --background: #ffffff;
-  --foreground: #181412;
-  --border: #e8dcd0;
-  --ring: #c84b24;
+  --background: #f5f3ee;
+  --foreground: #17181c;
+  --border: #e2dfd8;
+  --ring: #1d4c99;
+  --radius: 3px; /* square, not bubbly */
 }
 
-.kente-band {
-  background-image:
-    repeating-linear-gradient(90deg,
-      #e2a72e 0 22px, #1c1712 22px 26px, #1d7a43 26px 44px, #1c1712 44px 48px,
-      #e2a72e 48px 60px, #a3262a 60px 74px, #1c1712 74px 78px, #e2a72e 78px 96px, #12214a 96px 104px);
+body {
+  font-feature-settings: "ss01", "cv11";
 }
-.kente-zigzag {
-  background-color: #1c1712;
-  background-image:
-    linear-gradient(135deg, #e2a72e 25%, transparent 25%),
-    linear-gradient(225deg, #e2a72e 25%, transparent 25%);
-  background-size: 18px 18px;
-  background-position: 0 0;
+
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
-.woven {
-  background-image:
-    repeating-linear-gradient(0deg, rgb(216 181 109 / 0.07) 0 2px, transparent 2px 6px),
-    repeating-linear-gradient(90deg, rgb(216 181 109 / 0.05) 0 2px, transparent 2px 6px),
-    radial-gradient(ellipse at 20% -10%, #1b2f63 0%, transparent 55%),
-    radial-gradient(ellipse at 110% 110%, rgb(180 86 43 / 0.25) 0%, transparent 50%);
+
+/* Woven kente stripe used as a thin divider. */
+.kente-stripe {
+  background-image: repeating-linear-gradient(90deg,
+    #c4932f 0 28px, #141414 28px 32px, #17713f 32px 52px, #141414 52px 56px,
+    #c4932f 56px 70px, #a8201f 70px 84px, #141414 84px 88px, #c4932f 88px 104px, #10306a 104px 112px);
 }
 
 @media print {
-  body * { visibility: hidden !important; }
-  .print-area, .print-area * { visibility: visible !important; }
-  .print-area { position: absolute; inset: 0; margin: 0; box-shadow: none !important; }
   .no-print { display: none !important; }
 }

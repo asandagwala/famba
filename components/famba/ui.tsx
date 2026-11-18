@@ -1,30 +1,17 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 
-// ── Brand ────────────────────────────────────────────────
-export const C = {
-  terracotta: "#C84B24",
-  terracottaDark: "#A63816",
-  ochre: "#E59A18",
-  ochreSoft: "#FFF5DF",
-  green: "#1E6B45",
-  greenSoft: "#EAF6F0",
-  crimson: "#8B1E24",
-  cream: "#FFF8EE",
-  ink: "#181412",
-  muted: "#685D55",
-  line: "#EDE2D6",
-};
-
+// ── Data helpers ─────────────────────────────────────────
 export const COUNTRIES = [
-  { name: "South Africa", code: "ZA", ccy: "ZAR", payout: "Bank EFT" },
-  { name: "Kenya", code: "KE", ccy: "KES", payout: "M-Pesa" },
-  { name: "Nigeria", code: "NG", ccy: "NGN", payout: "Bank transfer" },
-  { name: "Ghana", code: "GH", ccy: "GHS", payout: "Mobile money" },
-  { name: "Zambia", code: "ZM", ccy: "ZMW", payout: "Bank transfer" },
+  { name: "South Africa", code: "ZA", ccy: "ZAR" },
+  { name: "Kenya", code: "KE", ccy: "KES" },
+  { name: "Nigeria", code: "NG", ccy: "NGN" },
+  { name: "Ghana", code: "GH", ccy: "GHS" },
+  { name: "Zambia", code: "ZM", ccy: "ZMW" },
 ] as const;
 export const countryByName = (n: string) => COUNTRIES.find((c) => c.name === n) ?? COUNTRIES[0];
 
@@ -58,12 +45,6 @@ const pad = (hex: string) => hex.replace(/^0x/, "").toLowerCase().padStart(64, "
 
 export function useWallet() {
   const [address, setAddress] = useState<string | null>(null);
-  const [balance, setBalance] = useState<number | null>(null);
-
-  const refresh = useCallback(async (addr: string) => {
-    const raw = (await eth()!.request({ method: "eth_call", params: [{ to: USDC, data: "0x70a08231" + pad(addr) }, "latest"] })) as string;
-    setBalance(Number(BigInt(raw)) / 1e6);
-  }, []);
 
   const connect = useCallback(async () => {
     const e = eth();
@@ -80,25 +61,23 @@ export function useWallet() {
       }
     }
     setAddress(addr);
-    await refresh(addr).catch(() => {});
     return addr;
-  }, [refresh]);
+  }, []);
 
   /** Sends a real USDC transfer; returns the tx hash once the user confirms. */
   const sendUsdc = useCallback(
     async (to: string, amount: number) => {
       const from = address ?? (await connect());
       const units = BigInt(Math.round(amount * 1e6));
-      const hash = (await eth()!.request({
+      return (await eth()!.request({
         method: "eth_sendTransaction",
         params: [{ from, to: USDC, value: "0x0", data: "0xa9059cbb" + pad(to) + pad(units.toString(16)) }],
       })) as string;
-      return hash;
     },
     [address, connect],
   );
 
-  /** Polls the server-side verifier until the tx is mined (up to ~60s). */
+  /** Retries the server-side verifier until the tx is mined (up to ~60s). */
   const waitAndVerify = useCallback(async <T,>(verify: () => Promise<T>) => {
     let lastErr: unknown;
     for (let i = 0; i < 20; i++) {
@@ -113,94 +92,162 @@ export function useWallet() {
     throw lastErr;
   }, []);
 
-  return { address, balance, connect, sendUsdc, waitAndVerify, refresh };
+  return { address, connect, sendUsdc, waitAndVerify };
 }
 
-// ── Layout ───────────────────────────────────────────────
-export function Logo({ light = false }: { light?: boolean }) {
+// ── Brand ────────────────────────────────────────────────
+/** Famba mark: four kente blocks held by bold black weave lines, like the cloth. */
+export function Mark({ size = 28 }: { size?: number }) {
   return (
-    <Link href="/" className="flex items-center gap-3">
-      <span className="flex size-10 items-center justify-center rounded-[10px] text-2xl font-black text-white" style={{ background: C.terracotta, fontFamily: "var(--font-display)" }}>
-        F
-      </span>
-      <span>
-        <span className={`block text-xl font-black tracking-[0.08em] ${light ? "text-white" : ""}`} style={{ fontFamily: "var(--font-display)" }}>
-          FAMBA
-        </span>
-        <span className={`block text-[9px] font-bold uppercase tracking-[0.16em] ${light ? "text-white/70" : "text-[#685D55]"}`}>
-          Pay across Africa, instantly
-        </span>
+    <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden>
+      <rect width="28" height="28" rx="2" fill="#141414" />
+      <rect x="3" y="3" width="10" height="10" fill="#d9a22b" />
+      <rect x="15" y="3" width="10" height="10" fill="#17713f" />
+      <rect x="3" y="15" width="10" height="10" fill="#a8201f" />
+      <rect x="15" y="15" width="10" height="10" fill="#d9a22b" />
+      <path d="M15 8h10M8 15v10M3 20h10M20 15v10" stroke="#141414" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+export const SLOGAN = "Where money moves freely.";
+
+export function Logo({ tone = "dark", slogan = true }: { tone?: "dark" | "light"; slogan?: boolean }) {
+  const light = tone === "light";
+  return (
+    <Link href="/" className="flex items-center gap-2.5">
+      <Mark size={slogan ? 32 : 28} />
+      <span className="flex flex-col">
+        <span className={`font-display text-[22px] font-semibold leading-none tracking-tight ${light ? "text-ivory" : "text-ink"}`}>Famba</span>
+        {slogan && <span className={`mt-1 text-[11px] leading-none ${light ? "text-ivory/60" : "text-stone"}`}>{SLOGAN}</span>}
       </span>
     </Link>
   );
 }
 
-export const StripeBar = () => <div className="h-1.5 w-full bg-gradient-to-r from-[#C84B24] via-[#E59A18] to-[#1E6B45]" />;
+export const KenteStripe = ({ className = "h-1" }: { className?: string }) => <div className={`kente-stripe w-full ${className}`} aria-hidden />;
+
+/** The real kente cloth, faded up into the blue background. Use at the bottom of a blue section. */
+export function KenteFade({ className = "h-24" }: { className?: string }) {
+  return (
+    <div className={`pointer-events-none relative w-full overflow-hidden ${className}`} aria-hidden>
+      <Image src="/famba/kente.png" alt="" fill sizes="100vw" className="object-cover object-bottom opacity-50" />
+      <div className="absolute inset-0 bg-gradient-to-b from-night via-night/60 to-transparent" />
+    </div>
+  );
+}
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/suppliers", label: "Pay suppliers" },
-  { href: "/cash-out", label: "Cash out" },
+  { href: "/dashboard", label: "Payments" },
+  { href: "/suppliers", label: "Suppliers" },
+  { href: "/settlements", label: "Settlements" },
 ];
 
 export function AppHeader({ merchant }: { merchant?: string }) {
   const path = usePathname();
   return (
-    <>
-      <StripeBar />
-      <header className="sticky top-0 z-30 border-b border-[#EDE2D6] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-8">
-          <Logo />
-          <nav className="order-3 flex w-full gap-1 overflow-x-auto text-sm font-bold sm:order-none sm:w-auto">
-            {NAV.map((n) => (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`whitespace-nowrap rounded-lg px-3 py-2 transition ${path === n.href ? "bg-[#FFF1EB] text-[#C84B24]" : "text-[#463C35] hover:text-[#C84B24]"}`}
-              >
-                {n.label}
-              </Link>
-            ))}
+    <header className="sticky top-0 z-30 bg-night text-ivory">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-5 sm:px-8">
+        <div className="flex items-center gap-8">
+          <Logo tone="light" />
+          <nav className="hidden gap-1 text-[14px] sm:flex">
+            {NAV.map((n) => {
+              const active = path === n.href;
+              return (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={`relative px-3 py-5 transition-colors ${active ? "text-ivory" : "text-ivory/60 hover:text-ivory"}`}
+                >
+                  {n.label}
+                  {active && <span className="absolute inset-x-3 bottom-0 h-[3px] bg-gold" />}
+                </Link>
+              );
+            })}
           </nav>
-          {merchant && (
-            <span className="hidden rounded-full border border-[#EDE2D6] bg-[#FFF8EE] px-3 py-1.5 text-xs font-bold text-[#463C35] md:block">
-              {merchant}
-            </span>
-          )}
         </div>
-      </header>
-    </>
+        {merchant && <span className="py-5 text-[13px] text-ivory/60">{merchant}</span>}
+      </div>
+      <nav className="flex gap-1 overflow-x-auto px-3 pb-2 text-[14px] sm:hidden">
+        {NAV.map((n) => (
+          <Link key={n.href} href={n.href} className={`rounded px-3 py-1.5 ${path === n.href ? "bg-night-3 text-ivory" : "text-ivory/60"}`}>
+            {n.label}
+          </Link>
+        ))}
+      </nav>
+      <KenteStripe />
+    </header>
   );
 }
 
-export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  const bg = /(^|\s)bg-/.test(className) ? "" : "bg-white";
-  return <div className={`rounded-2xl border border-[#EDE2D6] ${bg} ${className}`}>{children}</div>;
+// ── Building blocks ──────────────────────────────────────
+export function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <section className={`rounded-lg border border-rule bg-paper ${className}`}>{children}</section>;
 }
 
-export function Pill({ tone, children }: { tone: "green" | "ochre" | "muted" | "terracotta"; children: React.ReactNode }) {
-  const cls = {
-    green: "bg-[#EAF6F0] text-[#1E6B45]",
-    ochre: "bg-[#FFF5DF] text-[#A86A06]",
-    muted: "bg-[#F4EEE7] text-[#685D55]",
-    terracotta: "bg-[#FFF1EB] text-[#C84B24]",
-  }[tone];
-  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${cls}`}>{children}</span>;
-}
-
-export function Route({ from, to }: { from: string; to: string }) {
-  const a = countryByName(from).code;
-  const b = countryByName(to).code;
+export function PanelHead({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-[#FFF8EE] px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#463C35]">
-      {a} <span className="text-[#E59A18]">→</span> {b}
+    <div className="flex items-end justify-between gap-4 border-b border-rule px-6 py-4">
+      <div>
+        <h2 className="font-display text-[19px] font-semibold">{title}</h2>
+        {sub && <p className="mt-0.5 text-[13px] text-stone">{sub}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+export function Status({ tone, children }: { tone: "leaf" | "gold" | "stone" | "kred"; children: React.ReactNode }) {
+  const dot = { leaf: "bg-leaf", gold: "bg-gold", stone: "bg-stone/50", kred: "bg-kred" }[tone];
+  const text = { leaf: "text-leaf", gold: "text-gold-deep", stone: "text-stone", kred: "text-kred" }[tone];
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-medium ${text}`}>
+      <span className={`size-1.5 rounded-full ${dot}`} />
+      {children}
     </span>
   );
 }
 
+export function Route({ from, to }: { from: string; to: string }) {
+  return (
+    <span className="whitespace-nowrap text-[12px] font-semibold tracking-wide text-stone">
+      {countryByName(from).code}
+      <span className="mx-1 text-gold">→</span>
+      {countryByName(to).code}
+    </span>
+  );
+}
+
+export function PageTitle({ eyebrow, title, children }: { eyebrow?: string; title: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        {eyebrow && <p className="text-[13px] font-medium text-stone">{eyebrow}</p>}
+        <h1 className="mt-1 font-display text-[34px] font-semibold leading-tight tracking-tight">{title}</h1>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export const inputCls =
-  "w-full rounded-xl border border-[#E8DCD0] bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-[#C84B24] focus:ring-2 focus:ring-[#C84B24]/15";
-export const labelCls = "mb-1.5 block text-xs font-bold uppercase tracking-wider text-[#685D55]";
+  "w-full rounded-sm border border-rule bg-white px-3.5 py-2.5 text-[15px] text-ink outline-none transition placeholder:text-stone/50 focus:border-night-3 focus:ring-2 focus:ring-night-3/15";
+export const labelCls = "mb-1.5 block text-[13px] font-medium text-stone";
+/** Primary action: kente royal blue. */
 export const btnPrimary =
-  "rounded-xl bg-[#C84B24] px-5 py-3 font-bold text-white transition hover:bg-[#A63816] disabled:cursor-not-allowed disabled:opacity-50";
-export const btnDark = "rounded-xl bg-[#181412] px-5 py-3 font-bold text-white transition hover:bg-[#C84B24] disabled:opacity-50";
+  "inline-flex items-center justify-center rounded-sm bg-night px-5 py-3 text-[15px] font-semibold text-white transition hover:bg-night-3 disabled:cursor-not-allowed disabled:opacity-50";
+export const btnNight =
+  "inline-flex items-center justify-center rounded-md bg-night px-5 py-3 text-[15px] font-semibold text-ivory transition hover:bg-night-3 disabled:opacity-50";
+export const btnLine =
+  "inline-flex items-center justify-center rounded-md border border-ink/20 px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:border-ink disabled:opacity-50";
+
+export function Modal({ children, onClose, width = "max-w-md" }: { children: React.ReactNode; onClose: () => void; width?: string }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-night/70 p-4" onClick={onClose}>
+      <div className={`max-h-[92vh] w-full ${width} overflow-auto rounded-lg bg-paper shadow-2xl`} onClick={(e) => e.stopPropagation()}>
+        <KenteStripe className="h-1.5" />
+        {children}
+      </div>
+    </div>
+  );
+}
