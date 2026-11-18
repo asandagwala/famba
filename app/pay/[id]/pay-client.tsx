@@ -1,12 +1,12 @@
 "use client";
 
-import Image from "next/image";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Order } from "@/lib/famba/db";
 import type { Currency } from "@/lib/famba/rates";
-import { COUNTRIES, EXPLORER_TX, Logo, StripeBar, api, btnPrimary, countryByName, inputCls, money, shortHex, usdc, useWallet, when } from "@/components/famba/ui";
+import { LOCAL_METHODS } from "@/lib/famba/payment-methods";
+import { COUNTRIES, EXPLORER_TX, KenteFade, Logo, api, btnPrimary, countryByName, inputCls, labelCls, money, shortHex, usdc, useWallet, when } from "@/components/famba/ui";
 
 type Checkout = {
   order: Order;
@@ -15,21 +15,18 @@ type Checkout = {
   rateSource: "live" | "fallback";
 };
 
+type Method = { kind: "mobile_money" | "bank" | "usdc_wallet"; provider: string };
+
 export default function PayClient() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<Checkout | null>(null);
-  const [notFound, setNotFound] = useState<string | null>(null);
-  const [country, setCountry] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [manualHash, setManualHash] = useState("");
-  const wallet = useWallet();
+  const [missing, setMissing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setData(await api<Checkout>(`/api/orders/${encodeURIComponent(id)}`));
     } catch (e) {
-      setNotFound((e as Error).message);
+      setMissing((e as Error).message);
     }
   }, [id]);
 
@@ -38,35 +35,89 @@ export default function PayClient() {
     return () => window.clearTimeout(t);
   }, [load]);
 
-  if (notFound)
-    return (
-      <Shell>
-        <div className="p-8 text-center">
-          <h1 className="text-2xl font-black">Payment link not found</h1>
-          <p className="mt-2 text-[#685D55]">{notFound}</p>
+  return (
+    <div className="relative flex min-h-screen flex-col bg-night">
+      <div className="relative z-10 mx-auto w-full max-w-[960px] flex-1 px-4 pb-10 pt-8">
+        <div className="mb-4 flex items-center justify-between">
+          <Logo tone="light" />
+          <span className="text-[13px] text-ivory/60">Secure checkout</span>
         </div>
-      </Shell>
-    );
-  if (!data) return <Shell><p className="p-10 text-center text-[#685D55]">Loading payment…</p></Shell>;
+        {missing ? (
+          <div className="rounded-lg bg-paper p-10 text-center">
+            <h1 className="font-display text-2xl font-semibold">Payment link not found</h1>
+            <p className="mt-2 text-stone">{missing}</p>
+          </div>
+        ) : !data ? (
+          <div className="rounded-lg bg-paper p-10 text-center text-stone">Loading payment…</div>
+        ) : data.order.status === "PAID" ? (
+          <Receipt data={data} />
+        ) : (
+          <PayForm data={data} onPaid={(order) => setData({ ...data, order })} />
+        )}
+        <p className="mt-5 text-center text-[12px] leading-relaxed text-ivory/50">
+          Settled in USDC on Base. Mobile money and bank collection are simulated on this testnet demo; USDC wallet payments are real and verified on-chain.
+        </p>
+      </div>
 
+      {/* A subtle hint of kente cloth along the bottom, fading into the background */}
+      <KenteFade />
+    </div>
+  );
+}
+
+function PayForm({ data, onPaid }: { data: Checkout; onPaid: (o: Order) => void }) {
   const { order, merchant, rates } = data;
-  const payer = countryByName(country ?? order.customerCountry);
-  const localAmount = order.usdcAmount * rates[payer.ccy as Currency];
-  const bankFee = order.amountZar * 0.095;
+  const [country, setCountry] = useState(order.customerCountry);
+  const payer = countryByName(country);
+  const ccy = payer.ccy as Currency;
+  const options = LOCAL_METHODS[ccy];
 
-  const verify = (txHash: string) =>
-    api<{ order: Order }>(`/api/orders/${order.id}/verify`, { method: "POST", body: JSON.stringify({ txHash }) });
+  const methods: Method[] = [
+    ...options.mobile.map((p) => ({ kind: "mobile_money" as const, provider: p })),
+    { kind: "bank", provider: options.bank },
+    { kind: "usdc_wallet", provider: "USDC wallet" },
+  ];
+  const [methodKey, setMethodKey] = useState(0);
+  const method = methods[Math.min(methodKey, methods.length - 1)];
 
-  const payWithWallet = async () => {
+  const [phone, setPhone] = useState("");
+  const [hash, setHash] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const wallet = useWallet();
+
+  const local = order.usdcAmount * rates[ccy];
+  const perUnit = order.amountZar / local;
+  const bankCost = order.amountZar * 0.07;
+
+  const payLocal = async () => {
+    setError(null);
+    setBusy(method.kind === "mobile_money" ? `Approve the ${method.provider} request on your phone…` : `Confirming with ${method.provider}…`);
+    try {
+      await new Promise((r) => setTimeout(r, 1600)); // time for the customer to approve on their phone
+      const r = await api<{ order: Order }>(`/api/orders/${order.id}/pay-local`, {
+        method: "POST",
+        body: JSON.stringify({ method: method.kind, provider: method.provider, currency: ccy, phone }),
+      });
+      onPaid(r.order);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const verify = (txHash: string) => api<{ order: Order }>(`/api/orders/${order.id}/verify`, { method: "POST", body: JSON.stringify({ txHash }) });
+
+  const payWallet = async () => {
     setError(null);
     try {
-      setBusy("Connecting wallet…");
+      setBusy("Connecting your wallet…");
       await wallet.connect();
       setBusy("Confirm the payment in your wallet…");
-      const hash = await wallet.sendUsdc(merchant.walletAddress, order.usdcAmount);
+      const tx = await wallet.sendUsdc(merchant.walletAddress, order.usdcAmount);
       setBusy("Confirming on the blockchain…");
-      const res = await wallet.waitAndVerify(() => verify(hash));
-      setData({ ...data, order: res.order });
+      onPaid((await wallet.waitAndVerify(() => verify(tx))).order);
     } catch (e) {
       const msg = (e as { message?: string }).message ?? "Payment failed";
       setError(/denied|rejected/i.test(msg) ? "You cancelled the payment in your wallet." : msg);
@@ -75,12 +126,11 @@ export default function PayClient() {
     }
   };
 
-  const verifyManual = async () => {
+  const checkHash = async () => {
     setError(null);
     setBusy("Checking the blockchain…");
     try {
-      const res = await verify(manualHash.trim());
-      setData({ ...data, order: res.order });
+      onPaid((await verify(hash.trim())).order);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -88,148 +138,161 @@ export default function PayClient() {
     }
   };
 
-  const demoPay = async () => {
-    setError(null);
-    setBusy("Processing demo payment…");
-    try {
-      const res = await api<{ order: Order }>(`/api/orders/${order.id}/simulate`, { method: "POST" });
-      setData({ ...data, order: res.order });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  // EIP-681 link mobile wallets understand: transfer USDC on Base Sepolia to the merchant
   const eip681 = `ethereum:0x036CbD53842c5426634e7929541eC2318f3dCF7e@84532/transfer?address=${merchant.walletAddress}&uint256=${Math.round(order.usdcAmount * 1e6)}`;
 
-  if (order.status === "PAID")
-    return (
-      <Shell>
-        <div className="overflow-hidden">
-          <Image src="/famba/baskets.png" alt="" width={800} height={300} className="h-32 w-full object-cover" />
-          <div className="p-6 text-center">
-            <div className="mx-auto -mt-14 flex size-16 items-center justify-center rounded-full border-4 border-white bg-[#1E6B45] text-3xl text-white">✓</div>
-            <h1 className="mt-3 text-2xl font-black" style={{ fontFamily: "var(--font-display)" }}>
-              Payment complete
-            </h1>
-            <p className="text-[#685D55]">
-              {merchant.name} received {money(order.amountZar, "ZAR")} in {merchant.city.split(",")[0]}.
-            </p>
-            <dl className="mx-auto mt-5 max-w-sm space-y-2 rounded-2xl bg-[#FFF8EE] p-4 text-left text-sm">
-              <Row k="For" v={order.description} />
-              <Row k="Paid" v={usdc(order.usdcAmount)} />
-              <Row k="When" v={order.paidAt ? when(order.paidAt) : "—"} />
-              <Row k="Reference" v={order.id} />
-              {order.txHash ? (
-                <Row k="Transaction" v={<a className="text-[#1E6B45] underline" href={EXPLORER_TX + order.txHash} target="_blank" rel="noreferrer">{shortHex(order.txHash, 10, 6)}</a>} />
-              ) : (
-                <Row k="Mode" v="Demo payment (no blockchain transaction)" />
-              )}
-            </dl>
-          </div>
-        </div>
-      </Shell>
-    );
-
   return (
-    <Shell>
-      <div className="grid md:grid-cols-[1fr_1.1fr]">
-        {/* Order summary */}
-        <div className="relative min-h-56 overflow-hidden md:rounded-l-3xl">
-          <Image src="/famba/hands-harvest.png" alt="" fill className="object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
-          <div className="relative flex h-full flex-col justify-end p-6 text-white">
-            <p className="text-xs font-bold uppercase tracking-wider text-white/70">Pay {merchant.name}</p>
-            <p className="text-sm text-white/80">{merchant.city}</p>
-            <h1 className="mt-2 text-2xl font-black" style={{ fontFamily: "var(--font-display)" }}>
-              {order.description}
-            </h1>
-            <p className="mt-1 font-mono text-3xl font-black">{money(order.amountZar, "ZAR")}</p>
-            <p className="text-sm text-white/80">for {order.customerName}</p>
-          </div>
+    <div className="grid overflow-hidden rounded-lg bg-paper shadow-2xl md:grid-cols-[340px_1fr]">
+      {/* Order */}
+      <aside className="border-b border-rule bg-ivory p-7 md:border-b-0 md:border-r">
+        <p className="text-[13px] text-stone">Paying</p>
+        <p className="font-display text-[22px] font-semibold leading-tight">{merchant.name}</p>
+        <p className="text-[13px] text-stone">{merchant.city}</p>
+
+        <div className="mt-6 border-t border-rule pt-5">
+          <p className="text-[15px]">{order.description}</p>
+          <p className="mt-1 text-[13px] text-stone">Order for {order.customerName}</p>
         </div>
 
-        {/* Pay */}
-        <div className="space-y-4 p-6">
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-[#685D55]">I&apos;m paying from</label>
-            <select className={inputCls} value={payer.name} onChange={(e) => setCountry(e.target.value)}>
-              {COUNTRIES.map((c) => (
-                <option key={c.code}>{c.name}</option>
-              ))}
-            </select>
+        <dl className="mt-6 space-y-2.5 border-t border-rule pt-5 text-[14px]">
+          <div className="flex justify-between">
+            <dt className="text-stone">Price</dt>
+            <dd className="num font-semibold">{money(order.amountZar, "ZAR")}</dd>
           </div>
-
-          <div className="rounded-2xl border border-[#EDE2D6] p-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[#685D55]">You pay about</span>
-              <span className="font-mono text-xl font-black">{money(localAmount, payer.ccy)}</span>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-sm">
-              <span className="text-[#685D55]">Sent as</span>
-              <span className="font-mono font-bold text-[#A86A06]">{usdc(order.usdcAmount)}</span>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-sm">
-              <span className="text-[#685D55]">{merchant.name} receives</span>
-              <span className="font-mono font-bold text-[#1E6B45]">{money(order.amountZar, "ZAR")}</span>
-            </div>
-            <p className="mt-3 rounded-lg bg-[#EAF6F0] px-3 py-2 text-xs text-[#1E6B45]">
-              Arrives in ~15 seconds. A bank transfer from {payer.name === "South Africa" ? "abroad" : payer.name} would cost about {money(bankFee, "ZAR")} and take 3–5 days.
-            </p>
+          <div className="flex justify-between">
+            <dt className="text-stone">Settles as</dt>
+            <dd className="num">{usdc(order.usdcAmount)}</dd>
           </div>
+          <div className="flex justify-between">
+            <dt className="text-stone">Arrives</dt>
+            <dd>in about 15 seconds</dd>
+          </div>
+        </dl>
+      </aside>
 
-          {error && <p className="rounded-xl bg-[#FBEDEA] px-3 py-2 text-sm text-[#8B1E24]">{error}</p>}
+      {/* Pay */}
+      <div className="p-7">
+        <label className="block">
+          <span className={labelCls}>Where are you paying from?</span>
+          <select className={inputCls} value={country} onChange={(e) => { setCountry(e.target.value); setMethodKey(0); }}>
+            {COUNTRIES.map((c) => (
+              <option key={c.code}>{c.name}</option>
+            ))}
+          </select>
+        </label>
 
-          <button onClick={payWithWallet} disabled={!!busy} className={`${btnPrimary} w-full py-4 text-lg`}>
-            {busy ?? `Pay ${usdc(order.usdcAmount)} with wallet`}
-          </button>
-          <p className="-mt-2 text-center text-xs text-[#685D55]">MetaMask or any browser wallet · Base Sepolia testnet</p>
+        <div className="mt-6">
+          <p className="text-[13px] text-stone">You pay</p>
+          <p className="num font-display text-[44px] font-semibold leading-none tracking-tight">{money(local, ccy)}</p>
+          <p className="mt-2 text-[13px] text-stone">
+            {ccy === "ZAR" ? "No conversion needed." : <>Rate locked for 15 minutes · 1 {ccy} = R{perUnit.toFixed(4)}</>}
+          </p>
+        </div>
 
-          <details className="rounded-2xl border border-[#EDE2D6] p-4 text-sm">
-            <summary className="cursor-pointer font-bold">Pay from a phone wallet (QR code)</summary>
-            <div className="mt-3 flex flex-col items-center gap-3">
-              <QRCodeSVG value={eip681} size={160} />
-              <p className="break-all text-center font-mono text-[11px] text-[#685D55]">Send {usdc(order.usdcAmount)} to {merchant.walletAddress}</p>
+        <fieldset className="mt-7">
+          <legend className={labelCls}>Pay with</legend>
+          <div className="divide-y divide-rule overflow-hidden rounded-md border border-rule">
+            {methods.map((m, i) => {
+              const active = i === methodKey;
+              return (
+                <label key={m.provider} className={`flex cursor-pointer items-center justify-between gap-3 px-4 py-3 transition ${active ? "bg-azure-soft" : "bg-white hover:bg-ivory"}`}>
+                  <span className="flex items-center gap-3">
+                    <input type="radio" name="method" checked={active} onChange={() => setMethodKey(i)} className="accent-[#1d4c99]" />
+                    <span className="text-[15px] font-medium">{m.provider}</span>
+                  </span>
+                  <span className="text-[12px] text-stone">
+                    {m.kind === "mobile_money" ? "Mobile money" : m.kind === "bank" ? "Bank" : "Stablecoin"}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        {method.kind === "mobile_money" && (
+          <label className="mt-5 block">
+            <span className={labelCls}>{method.provider} number</span>
+            <input className={inputCls} inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={ccy === "KES" ? "07XX XXX XXX" : "Mobile number"} />
+          </label>
+        )}
+
+        {method.kind === "usdc_wallet" && (
+          <details className="mt-5 rounded-md border border-rule bg-white p-4 text-[14px]">
+            <summary className="cursor-pointer font-medium">Paying from a phone wallet? Scan instead</summary>
+            <div className="mt-4 flex flex-col items-center gap-3">
+              <QRCodeSVG value={eip681} size={150} />
+              <p className="break-all text-center text-[12px] text-stone">
+                Send {usdc(order.usdcAmount)} to {merchant.walletAddress}
+              </p>
               <div className="flex w-full gap-2">
-                <input className={`${inputCls} font-mono text-xs`} placeholder="Paste transaction hash 0x…" value={manualHash} onChange={(e) => setManualHash(e.target.value)} />
-                <button onClick={verifyManual} disabled={!!busy || !manualHash} className="shrink-0 rounded-xl bg-[#181412] px-3 font-bold text-white disabled:opacity-50">
+                <input className={`${inputCls} text-[13px]`} placeholder="Paste transaction hash 0x…" value={hash} onChange={(e) => setHash(e.target.value)} />
+                <button onClick={checkHash} disabled={!!busy || !hash} className="shrink-0 rounded-md bg-night px-4 text-[14px] font-semibold text-ivory disabled:opacity-50">
                   Check
                 </button>
               </div>
             </div>
           </details>
+        )}
 
-          <button onClick={demoPay} disabled={!!busy} className="w-full text-center text-xs text-[#685D55] underline hover:text-[#C84B24]">
-            No wallet? Make a demo payment instead
-          </button>
-        </div>
-      </div>
-    </Shell>
-  );
-}
+        {error && <p className="mt-5 rounded-md bg-kred-soft px-4 py-3 text-[14px] text-kred">{error}</p>}
 
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-[#FFF8EE] text-[#181412]">
-      <StripeBar />
-      <div className="mx-auto flex max-w-4xl flex-col items-center px-4 py-6">
-        <div className="mb-5 self-start sm:self-center">
-          <Logo />
-        </div>
-        <div className="w-full overflow-hidden rounded-3xl border border-[#EDE2D6] bg-white shadow-xl shadow-[#C84B24]/5">{children}</div>
-        <p className="mt-4 text-center text-xs text-[#685D55]">Secured by Famba · USDC on Base · Payments are verified on the blockchain</p>
+        <button onClick={method.kind === "usdc_wallet" ? payWallet : payLocal} disabled={!!busy} className={`${btnPrimary} mt-6 w-full py-4 text-[16px]`}>
+          {busy ?? (method.kind === "usdc_wallet" ? `Pay ${usdc(order.usdcAmount)}` : `Pay ${money(local, ccy)}`)}
+        </button>
+
+        {ccy !== "ZAR" && (
+          <p className="mt-4 text-[13px] leading-relaxed text-stone">
+            A bank transfer from {payer.name} would typically lose around <span className="num font-medium text-kred">{money(bankCost, "ZAR")}</span> to fees and take 3–5 days. With Famba the fee is 0.2% and {merchant.name} is paid in seconds.
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
+function Receipt({ data }: { data: Checkout }) {
+  const { order, merchant } = data;
+  const pw = order.paidWith;
   return (
-    <div className="flex justify-between gap-4">
-      <dt className="text-[#685D55]">{k}</dt>
-      <dd className="text-right font-semibold">{v}</dd>
+    <div className="mx-auto max-w-[620px] overflow-hidden rounded-lg bg-paper shadow-2xl">
+      <div className="p-8 sm:p-10">
+        <p className="inline-flex items-center gap-2 text-[14px] font-semibold text-leaf">
+          <span className="flex size-5 items-center justify-center rounded-full bg-leaf text-[12px] text-white">✓</span>
+          Payment complete
+        </p>
+        <h1 className="mt-3 font-display text-[30px] font-semibold leading-tight">
+          {merchant.name} has been paid {money(order.amountZar, "ZAR")}
+        </h1>
+        <p className="mt-2 text-stone">Thank you. This payment has been matched to your order automatically.</p>
+
+        <dl className="mt-7 divide-y divide-rule border-y border-rule text-[14px]">
+          {[
+            ["Order", order.description],
+            ["You paid", pw ? (pw.method === "usdc_wallet" ? usdc(order.usdcAmount) : money(pw.amount, pw.currency)) : usdc(order.usdcAmount)],
+            ["Paid with", pw?.provider ?? "USDC"],
+            ["Settled as", usdc(order.usdcAmount)],
+            ["Date", order.paidAt ? when(order.paidAt) : "—"],
+            ["Reference", order.id],
+          ].map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-4 py-2.5">
+              <dt className="text-stone">{k}</dt>
+              <dd className="num text-right font-medium">{v}</dd>
+            </div>
+          ))}
+          {order.txHash && (
+            <div className="flex justify-between gap-4 py-2.5">
+              <dt className="text-stone">Blockchain proof</dt>
+              <dd>
+                <a href={EXPLORER_TX + order.txHash} target="_blank" rel="noreferrer" className="font-medium text-leaf underline underline-offset-2">
+                  {shortHex(order.txHash, 10, 6)}
+                </a>
+              </dd>
+            </div>
+          )}
+        </dl>
+        <button onClick={() => window.print()} className="no-print mt-6 text-[14px] font-medium text-stone underline underline-offset-2 hover:text-ink">
+          Print receipt
+        </button>
+      </div>
     </div>
   );
 }
