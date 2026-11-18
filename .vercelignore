@@ -1,0 +1,6 @@
+.env*
+data/
+.idea/
+.claude/
+node_modules/
+.next/
